@@ -1,7 +1,7 @@
 /*==================================================================================================
 *   Project              : RTD AUTOSAR 4.7
 *   Platform             : CORTEXM
-*   Peripheral           : 
+*   Peripheral           :
 *   Dependencies         : none
 *
 *   Autosar Version      : 4.7.0
@@ -25,7 +25,7 @@
 * Modified for HSE Secure Boot Implementation
 * Target device: S32K344
 * Target core: ARM cortex M7
-* Last Update: 2025-05-07 by SignalSlinger
+* Last Update: 2025-05-20 by SignalSlinger
 */
 
 HEAP_SIZE  = DEFINED(__heap_size__)  ? __heap_size__  : 0x00002000;
@@ -35,34 +35,43 @@ ENTRY(Reset_Handler)
 
 MEMORY
 {
-    /* Flash memory for application - 3MB usable (reserving 176KB for HSE and sBAF) */
-    /* Reduced int_pflash size to make room for fallback firmware and metadata */
     int_pflash              : ORIGIN = 0x00400000, LENGTH = 0x002E0000    /* 2.875MB for application */
-    
-    /* Added regions for fallback firmware system */
     fallback_meta           : ORIGIN = 0x006E0000, LENGTH = 0x00001000    /* 4KB for fallback metadata */
     fallback_fw             : ORIGIN = 0x006E1000, LENGTH = 0x0001F000    /* 124KB for fallback firmware */
     boot_log                : ORIGIN = 0x10080000, LENGTH = 0x00001000    /* 4KB for boot log in data flash */
-    
-    /* Original memory regions */
     int_dflash              : ORIGIN = 0x10000000, LENGTH = 0x00020000    /* 128KB */
     int_itcm                : ORIGIN = 0x00000000, LENGTH = 0x00010000    /* 64KB */
     int_dtcm                : ORIGIN = 0x20000000, LENGTH = 0x0001F000    /* 124KB */
     int_stack_dtcm          : ORIGIN = 0x2001F000, LENGTH = 0x00001000    /* 4KB */
-    
-    /* RAM regions - configured for secure boot */
     int_sram                : ORIGIN = 0x20400000, LENGTH = 0x00020000    /* 128KB for main application RAM */
     int_sram_fls_rsv        : ORIGIN = 0x20420000, LENGTH = 0x00000100    /* Reserved for flash operations */
     int_sram_no_cacheable   : ORIGIN = 0x20430000, LENGTH = 0x0000FF00    /* 64KB, needs to include int_sram_results */
     int_sram_results        : ORIGIN = 0x2043FF00, LENGTH = 0x00000100    /* Results section */
     int_sram_shareable      : ORIGIN = 0x20440000, LENGTH = 0x00004000    /* 16KB */
-    
-    /* HSE firmware reserved area starts at 0x00700000 */
     hse_firmware_area       : ORIGIN = 0x00700000, LENGTH = 0x0002C000    /* 176KB HSE firmware area */
 }
 
 SECTIONS
 {
+    /* ========= Secure Boot: Application Image Region ========= */
+    .app_image 0x005040C0 : AT(0x005040C0)
+    {
+        __APP_IMAGE_START = .;
+        KEEP(*(.intc_vector))
+        *(.startup)
+        *(.systeminit)
+        *(.text.startup)
+        *(.text)
+        *(.text*)
+        *(.rodata)
+        *(.rodata*)
+        *(.mcal_text)
+        *(.mcal_const_cfg)
+        *(.mcal_const)
+        . = ALIGN(4);
+        __APP_IMAGE_END = .;
+    } > int_pflash
+
     /* Main flash section including boot header and everything else */
     .pflash :
     {
@@ -72,57 +81,34 @@ SECTIONS
         KEEP(*(.boot_header))
         . = ALIGN(4);
         __boot_header_end = .;
-        
+
         /* Flash configuration section */
         . = ALIGN(4);
         __flash_config_start = .;
         KEEP(*(.FlashConfig))
         . = ALIGN(4);
         __flash_config_end = .;
-        
+
         /* Core text and data sections */
         . = ALIGN(2048);
         __text_start = .;
         __interrupts_init_start = .;
-        KEEP(*(.intc_vector))
+        /* .intc_vector now only in .app_image */
         . = ALIGN(4);
         __interrupts_init_end = .;
         KEEP(*(.core_loop))
         . = ALIGN(4);
-        *(.startup)
+        *(.init)
         . = ALIGN(4);
-        *(.systeminit)
+        *(.fini)
         . = ALIGN(4);
-        *(.text.startup)
-        . = ALIGN(4);
-        *(.text)
-        *(.text*)
-        . = ALIGN(4);
-        *(.mcal_text)
-        . = ALIGN(4);
-        *(.acmcu_code_rom)
-        . = ALIGN(4);
-        __acfls_code_rom_start = .;
-        *(.acfls_code_rom)
-        . = ALIGN(4);
-        __acfls_code_rom_end = .;
-        KEEP(*(.init))
-        . = ALIGN(4);
-        KEEP(*(.fini))
-        . = ALIGN(4);
-        *(.rodata)
-        *(.rodata*)
-        . = ALIGN(4);
-        *(.mcal_const_cfg)
-        . = ALIGN(4);
-        *(.mcal_const)
         . = ALIGN(4);
         __init_table = .;
         KEEP(*(.init_table))
         . = ALIGN(4);
         __zero_table = .;
         KEEP(*(.zero_table))
-        
+
         /* Add secure boot signature area */
         . = ALIGN(16);
         __signature_area_start = .;
@@ -133,8 +119,7 @@ SECTIONS
 
     . = ALIGN(4);
     __text_end = .;
-    
-    /* Fallback metadata section */
+
     .fallback_metadata (NOLOAD) :
     {
         . = ALIGN(4);
@@ -143,8 +128,7 @@ SECTIONS
         . = ALIGN(4);
         __fallback_metadata_end = .;
     } > fallback_meta
-    
-    /* Boot log section */
+
     .boot_log (NOLOAD) :
     {
         . = ALIGN(4);
@@ -153,8 +137,7 @@ SECTIONS
         . = ALIGN(4);
         __boot_log_end = .;
     } > boot_log
-    
-    /* Calculate proper LMA for sram_data to avoid overlap with pflash */
+
     __sram_data_rom = __text_end;
 
     .sram_bss (NOLOAD) :
@@ -191,7 +174,6 @@ SECTIONS
 
     __sram_data_rom_end = __sram_data_rom + (__sram_data_end__ - __sram_data_begin__);
 
-    /* heap section */
     .heap (NOLOAD):
     {
         . += ALIGN(4);
@@ -205,13 +187,15 @@ SECTIONS
     .acfls_code_ram :
     {
         acfls_code_ram_start  = .;
-        *(.acfls_code_ram)
+        /* No .acfls_code_rom input or output section */
         acfls_code_ram_stop   = .;
     } > int_sram_fls_rsv
 
+    __acfls_code_rom_start = .;
+    __acfls_code_rom_end = .;
+
     __non_cacheable_data_rom = __sram_data_rom_end;
 
-    /* HSE specific area for shared data */
     .hse_shared_data :
     {
         . = ALIGN(4);
@@ -236,7 +220,6 @@ SECTIONS
 
     __non_cacheable_data_rom_end = __non_cacheable_data_rom + (__non_cacheable_data_end__ - __non_cacheable_data_start__);
 
-    /* Remaining sections are kept from original script */
     .non_cacheable_bss (NOLOAD) :
     {
         . = ALIGN(16);
@@ -299,7 +282,7 @@ SECTIONS
 
     __tcm_code_rom_start = __tcm_data_rom_end;
 
-   .itcm_text : AT(__tcm_code_rom_start)
+    .itcm_text : AT(__tcm_code_rom_start)
     {
         . = ALIGN(4);
         __itcm_start__ = .;
@@ -334,29 +317,30 @@ SECTIONS
 
     __RAM_SHAREABLE_START    = ORIGIN(int_sram_shareable);
     __RAM_SHAREABLE_END      = ORIGIN(int_sram_shareable) + LENGTH(int_sram_shareable);
-    __RAM_SHAREABLE_SIZE     = 0xE;  /* 16 kbyte in power of 2 */
+    __RAM_SHAREABLE_SIZE     = 0xE;
     __ROM_SHAREABLE_START    = __shareable_data_rom;
     __ROM_SHAREABLE_END      = __shareable_data_rom_end;
     __RAM_NO_CACHEABLE_START = ORIGIN(int_sram_no_cacheable);
     __RAM_NO_CACHEABLE_END   = ORIGIN(int_sram_no_cacheable) + LENGTH(int_sram_no_cacheable) - 1;
-    __RAM_NO_CACHEABLE_SIZE  = 0x10;  /* 64kbyte in power of 2 */
+    __RAM_NO_CACHEABLE_SIZE  = 0x10;
     __ROM_NO_CACHEABLE_START = __non_cacheable_data_rom;
     __ROM_NO_CACHEABLE_END   = __non_cacheable_data_rom_end;
     __RAM_CACHEABLE_START    = __sram_data_begin__;
     __RAM_CACHEABLE_END      = __sram_data_begin__ + LENGTH(int_sram) - 1;
-    __RAM_CACHEABLE_SIZE     = 0x12;  /* 256kbyte in power of 2 */
+    __RAM_CACHEABLE_SIZE     = 0x12;
     __ROM_CACHEABLE_START    = __sram_data_rom;
     __ROM_CACHEABLE_END      = __sram_data_rom_end;
     __ROM_CODE_START         = ORIGIN(int_pflash);
     __ROM_DATA_START         = ORIGIN(int_dflash);
 
-    /* HSE secure boot specific symbols */
     __HSE_FIRMWARE_START     = ORIGIN(hse_firmware_area);
     __HSE_FIRMWARE_END       = ORIGIN(hse_firmware_area) + LENGTH(hse_firmware_area);
     __SIGNATURE_START        = __signature_area_start;
     __SIGNATURE_END          = __signature_area_end;
 
-    /* Fallback firmware and boot recovery symbols */
+    __APP_IMAGE_START        = __APP_IMAGE_START;
+    __APP_IMAGE_END          = __APP_IMAGE_END;
+
     __FALLBACK_META_START    = ORIGIN(fallback_meta);
     __FALLBACK_META_END      = ORIGIN(fallback_meta) + LENGTH(fallback_meta);
     __FALLBACK_FW_START      = ORIGIN(fallback_fw);
@@ -364,7 +348,6 @@ SECTIONS
     __BOOT_LOG_START         = ORIGIN(boot_log);
     __BOOT_LOG_END           = ORIGIN(boot_log) + LENGTH(boot_log);
 
-    /* Existing symbols from original script */
     __BSS_SRAM_START         = __sram_bss_start;
     __BSS_SRAM_END           = __sram_bss_end;
     __BSS_SRAM_SIZE          = __sram_bss_end - __sram_bss_start;
@@ -398,14 +381,18 @@ SECTIONS
 
     Fls_ACEraseRomStart      = __acfls_code_rom_start;
     Fls_ACEraseRomEnd        = __acfls_code_rom_end;
-    Fls_ACEraseSize          = (__acfls_code_rom_end - __acfls_code_rom_start) / 4; /* Copy 4 bytes at a time*/
-
+    Fls_ACEraseSize          = 0;
     Fls_ACWriteRomStart      = __acfls_code_rom_start;
     Fls_ACWriteRomEnd        = __acfls_code_rom_end;
-    Fls_ACWriteSize          = (__acfls_code_rom_end - __acfls_code_rom_start) / 4; /* Copy 4 bytes at a time*/
+    Fls_ACWriteSize          = 0;
 
     _ERASE_FUNC_ADDRESS_     = ADDR(.acfls_code_ram);
     _WRITE_FUNC_ADDRESS_     = ADDR(.acfls_code_ram);
+
+    /* Flash driver relocation symbols for MCAL compatibility */
+    FLASH_DRIVER_FLASH_SRC_START_ADDRESS = __acfls_code_rom_start;
+    FLASH_DRIVER_FLASH_SRC_END_ADDRESS   = __acfls_code_rom_end;
+    FLASH_DRIVER_RAM_DST_START_ADDRESS   = acfls_code_ram_start;
 
     __ENTRY_VTABLE           = __INIT_INTERRUPT_START;
 
@@ -413,7 +400,7 @@ SECTIONS
     __CORE1_VTOR             = __INIT_INTERRUPT_START;
     __CORE2_VTOR             = __INIT_INTERRUPT_START;
 
-    __INDEX_COPY_CORE2       = 3;    /* This symbol is used to initialize data of ITCM/DTCM for CORE2 */
+    __INDEX_COPY_CORE2       = 3;
 
     ASSERT(__standby_ram_end__ <= __STANDBY_RAM_LIMIT_END, "Memory for standby ram overflow")
 }
